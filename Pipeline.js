@@ -2,40 +2,25 @@
  * PIPELINE COMPARADO: Von Neumann vs Harvard
  ******************************************/
 
-// ---------------------------
-// Inicializar la hoja Pipeline
-// ---------------------------
 function inicializarPipelineComparado() {
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Pipeline");
 
-  // Limpiar Von Neumann (filas 2-21, columnas A-L)
-  hoja.getRange(2, 1, 20, 12).clearContent();
-  hoja.getRange(2, 1, 20, 12).clearFormat();
+  hoja.getRange(2, 1, 20, 12).clearContent().clearFormat();   // Von Neumann
+  hoja.getRange(26, 1, 20, 12).clearContent().clearFormat();  // Harvard
 
-  // Limpiar Harvard (filas 26-45, columnas A-L)
-  hoja.getRange(26, 1, 20, 12).clearContent();
-  hoja.getRange(26, 1, 20, 12).clearFormat();
-
-  // Reiniciar contadores
   hoja.getRange("D71").setValue(0);  // VN
-  hoja.getRange("F71").setValue(0); // Harvard
+  hoja.getRange("F71").setValue(0);  // Harvard
 
   SpreadsheetApp.getActiveSpreadsheet().toast("Pipeline inicializado ✅", "Estado");
 }
 
-// ---------------------------
-// Avanzar ambos pipelines
-// ---------------------------
 function avanzarPipelineComparado() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojaCodigo = ss.getSheetByName("Código");
   const hojaPipeline = ss.getSheetByName("Pipeline");
 
-  // ---------------------------
-  // 1️⃣ Leer instrucciones desde la hoja Código
-  // ---------------------------
-  const filaInicio = 11;
-  const colCodigo = 11;
+  const filaInicio = 3;
+  const colCodigo = 15;
   const totalFilas = hojaCodigo.getLastRow() - filaInicio + 1;
 
   const instrucciones = hojaCodigo.getRange(filaInicio, colCodigo, totalFilas, 1)
@@ -48,33 +33,17 @@ function avanzarPipelineComparado() {
     return;
   }
 
-  // ---------------------------
-  // 2️⃣ Obtener ciclos actuales
-  // ---------------------------
   let cicloVN = parseInt(hojaPipeline.getRange("D71").getValue() || 0, 10) + 1;
   let cicloH  = parseInt(hojaPipeline.getRange("F71").getValue() || 0, 10) + 1;
 
   hojaPipeline.getRange("D71").setValue(cicloVN);
   hojaPipeline.getRange("F71").setValue(cicloH);
 
-  // ---------------------------
-  // 3️⃣ Avanzar Von Neumann (con posibles stalls)
-  // ---------------------------
-  avanzarPipeline(hojaPipeline, instrucciones, cicloVN, 2, true);
-
-  // ---------------------------
-  // 4️⃣ Avanzar Harvard (fluido)
-  // ---------------------------
-  avanzarPipeline(hojaPipeline, instrucciones, cicloH, 26, false);
+  avanzarPipeline(hojaPipeline, instrucciones, cicloVN, 2, true);   // Von Neumann
+  avanzarPipeline(hojaPipeline, instrucciones, cicloH, 26, false);  // Harvard
 }
 
-// ---------------------------
-// Función auxiliar: Avanzar un pipeline
-// filaInicio = fila de la tabla (2 para VN, 26 para Harvard)
-// stalls = true si queremos simular hazards
-// ---------------------------
 function avanzarPipeline(hoja, instrucciones, ciclo, filaInicio, stalls) {
-  // Determinar instrucciones en cada etapa
   let IF = instrucciones[ciclo - 1] || "";
   let ID = instrucciones[ciclo - 2] || "";
   let EX = instrucciones[ciclo - 3] || "";
@@ -83,13 +52,9 @@ function avanzarPipeline(hoja, instrucciones, ciclo, filaInicio, stalls) {
 
   let comentario = "";
 
-  // Simular un stall simple para Von Neumann
-  if (stalls) {
-    // Ejemplo: si EX depende de ID de ciclo anterior
-    if (ID && EX && EX.includes(ID.split(',')[0].trim())) {
-      ID = "⏸";
-      comentario = "Data hazard stall";
-    }
+  if (stalls && hayHazard(ID, EX)) {
+    ID = "⏸";
+    comentario = "Data hazard stall";
   }
 
   const filaDestino = filaInicio + ciclo - 1;
@@ -101,7 +66,18 @@ function avanzarPipeline(hoja, instrucciones, ciclo, filaInicio, stalls) {
   hoja.getRange(filaDestino, 6).setValue(MEM);   // MEM
   hoja.getRange(filaDestino, 7).setValue(WB);    // WB
   hoja.getRange(filaDestino, 12).setValue(comentario); // Comentario
+
   aplicarFormatoPipeline();
+  marcarPuntoDeQuiebre(hoja);
+}
+
+function hayHazard(instrActual, instrAnterior) {
+  if (!instrActual || !instrAnterior) return false;
+
+  const destinoAnterior = instrAnterior.split(' ')[1]?.replace(',', '');
+  const operandosActual = instrActual.split(',').slice(1).map(op => op.trim());
+
+  return operandosActual.includes(destinoAnterior);
 }
 
 function aplicarFormatoPipeline() {
@@ -109,39 +85,68 @@ function aplicarFormatoPipeline() {
   const rangoVN = hoja.getRange("C2:G21");
   const rangoH  = hoja.getRange("C26:G45");
 
-  // Verde para instrucciones válidas
-  rangoVN.setFontColor("black").setBackground("lightgreen");
-  rangoH.setFontColor("black").setBackground("lightgreen");
+  rangoVN.setFontColor("black").setBackground("white");
+  rangoH.setFontColor("black").setBackground("white");
 
-  // Rojo para stalls
-  const celdas = hoja.getRange("D2:D45").getValues();
-  for (let i = 0; i < celdas.length; i++) {
-    if (celdas[i][0] === "⏸") {
-      hoja.getRange(i + 2, 4).setBackground("lightcoral");
+  const aplicarVerde = (rango) => {
+    const valores = rango.getValues();
+    for (let i = 0; i < valores.length; i++) {
+      for (let j = 0; j < valores[i].length; j++) {
+        if (valores[i][j] && valores[i][j] !== "⏸") {
+          rango.getCell(i + 1, j + 1).setBackground("#d4f4dd");
+        }
+      }
     }
-  }
+  };
 
-  // Comentarios en amarillo
-  const comentarios = hoja.getRange("L2:L45").getValues();
-  for (let i = 0; i < comentarios.length; i++) {
-    if (comentarios[i][0]) {
-      hoja.getRange(i + 2, 12).setBackground("lightyellow");
+  aplicarVerde(rangoVN);
+  aplicarVerde(rangoH);
+
+  const aplicarRojo = (columnaID, filaInicio) => {
+    const rangoID = hoja.getRange(columnaID + filaInicio + ":" + columnaID + (filaInicio + 19));
+    const valoresID = rangoID.getValues();
+    for (let i = 0; i < valoresID.length; i++) {
+      if (valoresID[i][0] === "⏸") {
+        hoja.getRange(filaInicio + i, columnaID.charCodeAt(0) - 64).setBackground("#f8d7da");
+      }
+    }
+  };
+
+  aplicarRojo("D", 2);   // Von Neumann
+  aplicarRojo("D", 26);  // Harvard
+
+  const aplicarAmarilloComentarios = (filaInicio) => {
+    const rangoComentarios = hoja.getRange(filaInicio, 12, 20, 1);
+    const comentarios = rangoComentarios.getValues();
+    for (let i = 0; i < comentarios.length; i++) {
+      if (comentarios[i][0]) {
+        hoja.getRange(filaInicio + i, 12).setBackground("#fff3cd");
+      }
+    }
+  };
+
+  aplicarAmarilloComentarios(2);
+  aplicarAmarilloComentarios(26);
+}
+
+function marcarPuntoDeQuiebre(hoja) {
+  const rangoVN = hoja.getRange("D2:D21").getValues();
+  for (let i = 0; i < rangoVN.length; i++) {
+    if (rangoVN[i][0] === "⏸") {
+      const fila = i + 2;
+      hoja.getRange(fila, 1, 1, 12).setBackground("#ffeb3b");
+      hoja.getRange(fila, 12).setValue("🔀 Punto de quiebre: stall detectado");
+      break;
     }
   }
 }
 
-
-// ---------------------------
-// Reiniciar pipeline completo
-// ---------------------------
 function reiniciarPipeline() {
   const hojaPipeline = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Pipeline");
 
-  // Limpiar tablas
   hojaPipeline.getRange(2, 1, 20, 12).clearContent().clearFormat();
   hojaPipeline.getRange(26, 1, 20, 12).clearContent().clearFormat();
 
-  // Reiniciar contadores
   hojaPipeline.getRange("D71").setValue(0);
   hojaPipeline.getRange("F71").setValue(0);
 

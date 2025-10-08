@@ -220,6 +220,10 @@ class CPU {
   }
 
   fetch(pasoActual) {
+    
+
+
+    
     const fila = 26;
     const columna = 8;
     this.interfaz.limpiarCelda("H56");
@@ -227,25 +231,29 @@ class CPU {
     // Obtener todas las instrucciones
     const instrucciones = this.interfazCodigo.leerInstrucciones();
 
-    // Filtrar solo las que no son declaraciones de variables
-    const instruccionesValidas = instrucciones.filter(inst => !/^int\s+\w+\s*=\s*\d+$/i.test(inst.trim()));
-
-    // Mapear solo las direcciones que contienen instrucciones válidas
     const direccionesInstrucciones = [];
     for (let i = 0; i < instrucciones.length; i++) {
       const inst = instrucciones[i].trim();
-      const esInstruccion = !/^int\s+\w+\s*=\s*\d+$/i.test(inst);
-      if (esInstruccion) {
+
+      const esDeclaracion = /^int\s+\w+\s*=\s*\d+$/i.test(inst);
+      const esInstruccionValida = !esDeclaracion && inst !== "";
+
+      if (esInstruccionValida) {
         direccionesInstrucciones.push(this.memorias[i]);
       }
     }
-    Logger.log(direccionesInstrucciones)
+
+    
 
     // Mostrar la dirección correspondiente al paso actual
     if (pasoActual < direccionesInstrucciones.length) {
       const direccion = direccionesInstrucciones[pasoActual];
       this.interfaz.escribirEnCelda(fila, columna, direccion);
     }
+    
+
+    
+    
   }
 
 
@@ -255,7 +263,10 @@ class CPU {
     const instrucciones = this.interfazCodigo.leerInstrucciones();
     const fila = 28;
     const columna = 8;
-
+    this.interfaz.cambiarColorCelda("O27",null)
+    this.interfaz.cambiarColorCelda("U18","ffeb3b3")
+    this.interfaz.cambiarColorCelda("U20","ffeb3b3")
+    this.interfaz.cambiarColorCelda("U22","ffeb3b3")
     this.cachesCPU.rellenarCachesDesdeHoja();
 
     // Construir el programa completo: variables + instrucciones
@@ -272,6 +283,29 @@ class CPU {
       if (esInstruccion) {
         claves.push(this.memorias[i]);
       }
+    }
+    this.interfaz.cambiarColorCelda("O27","#d9d2e9")
+    SpreadsheetApp.flush();
+    Utilities.sleep(2000);
+    this.interfaz.cambiarColorCelda("O27",null)
+    
+    if(pasoActual === 0){
+      this.interfaz.cambiarColorCelda("U18","#d9d2e9")
+      SpreadsheetApp.flush();
+      Utilities.sleep(2000);
+
+    }
+    if(pasoActual === 1){
+      this.interfaz.cambiarColorCelda("U20","#d9d2e9")
+      SpreadsheetApp.flush();
+      Utilities.sleep(2000);
+
+    }
+    if(pasoActual === 2){
+      this.interfaz.cambiarColorCelda("U22","#d9d2e9")
+      SpreadsheetApp.flush();
+      Utilities.sleep(2000);
+
     }
 
     if (pasoActual < claves.length) {
@@ -329,7 +363,8 @@ class CPU {
         destino = op2;
         fuente = op1;
       } else {
-        throw new Error(`Ningún operando es un registro válido: ${op1}, ${op2}`);
+        destino = op1;
+        fuente = op2;
       }
 
       // Obtener valor fuente desde registro, número o variable en memoria
@@ -353,7 +388,28 @@ class CPU {
       }
 
       if (operacion === "mov" || operacion === "movl") {
-        this.interfaz.escribirEnCelda(registros[destino].fila, registros[destino].columna, valor);
+        if (registros[destino]) {
+          // Escribir en registro
+          this.interfaz.escribirEnCelda(registros[destino].fila, registros[destino].columna, valor);
+        } 
+        else {
+          // Buscar dirección de variable destino
+          const direccionDestino = Array.from(programa.entries()).find(([_, val]) =>
+            new RegExp(`int\\s+${destino}\\s*=`, "i").test(val)
+          )?.[0];
+          Logger.log(direccionDestino)
+
+          if (direccionDestino) {
+            // Calcular fila destino en hoja RAM
+            const index = this.memorias.indexOf(direccionDestino);
+            const filaDestino = 14 + index * 2;
+            const columnaDestino = 24;
+            Logger.log(filaDestino)
+            this.interfaz.escribirEnCelda(18, columnaDestino, valor);
+          } else {
+            throw new Error(`Destino inválido o no encontrado: ${destino}`);
+          }
+        }
 
       } else if (["add", "sub", "mul"].includes(operacion)) {
         const valorActual = parseInt(this.interfaz.leerDeCelda(registros[destino].fila, registros[destino].columna)) || 0;
@@ -482,7 +538,7 @@ function getSimulador() {
   return simulador;
 }
 
-function escribirRam() {
+function cargarCodigo() {
   getSimulador().cargarProgramaAlaRam();
 }
 
@@ -492,11 +548,6 @@ function ejecutarPasos() {
 
 function reiniciar() {
   getSimulador().reiniciar();
-}
-
-function leer(){
-  let cpu = new CPU("VON NEUMANN");
-  cpu.fetch()
 }
 
 

@@ -16,11 +16,11 @@ function inicializarPipelineComparado() {
 
 function avanzarPipelineComparado() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const hojaCodigo = ss.getSheetByName("Código");
+  const hojaCodigo = ss.getSheetByName("Pipeline");
   const hojaPipeline = ss.getSheetByName("Pipeline");
 
-  const filaInicio = 3;
-  const colCodigo = 15;
+  const filaInicio = 19;
+  const colCodigo = 14;
   const totalFilas = hojaCodigo.getLastRow() - filaInicio + 1;
 
   const instrucciones = hojaCodigo.getRange(filaInicio, colCodigo, totalFilas, 1)

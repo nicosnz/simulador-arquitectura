@@ -12,105 +12,56 @@ function startSimulator2() {
   hoja.getRange("U16").setValue(comandos[0]);
   hoja.getRange("U17").setValue(comandos[1]);
 
-  // ⚠️ Evitamos while(true), usamos un bucle controlado
-  while(true) {
-    const control = hoja.getRange("K146").getValue();
-    const control2 = hoja.getRange("K149").getValue();
-    if (control === "STOP") {
-      procesoDetenido();
-      limpiarSimulador();
-      Logger.log("Simulador detenido por el botón.");
-      break; // sale del bucle
-    }
-    if (control2 === "PAUSE") {
-      Logger.log("Simulador pausado por el botón.");
-      procesoPausado();
-       // sale del bucle
-    }
-    const indiceArrays = parseInt(hoja.getRange("K147").getValue(), 10);
-    const indicePrograma = parseInt(hoja.getRange("K148").getValue(), 10);
-    let mensaje = palabras[indicePrograma];
-
-    if (indiceArrays === 0) {
-      hoja.getRange("L8").setBackground("red");
-      SpreadsheetApp.flush(); // fuerza actualización inmediata
-      Utilities.sleep(2000);
-
-      hoja.getRange("U16").setBackground("red");
-      SpreadsheetApp.flush();
-      Utilities.sleep(2000);
-
-      hoja.getRange("L8").setValue(memoriasPrograma[indiceArrays]);
-      SpreadsheetApp.flush();
-      Utilities.sleep(2000);
-
-      hoja.getRange("L12").setBackground("red");
-      SpreadsheetApp.flush();
-      hoja.getRange("L12").setValue(memoriasDato[indiceArrays]);
-      SpreadsheetApp.flush();
-      Utilities.sleep(2000);
-
-      hoja.getRange("L8").setBackground(null);
-      hoja.getRange("L12").setBackground(null);
-      hoja.getRange("U16").setBackground(null);
-      hoja.getRange("K147").setValue(indiceArrays + 1);
-
-      SpreadsheetApp.flush();
-
-    } else if (indiceArrays === 1) {
-      hoja.getRange("L8").setBackground("red");
-      SpreadsheetApp.flush();
-      Utilities.sleep(2000);
-
-      hoja.getRange("L8").setValue(memoriasPrograma[indiceArrays]);
-      SpreadsheetApp.flush();
-
-      hoja.getRange("L10").setBackground("red");
-      SpreadsheetApp.flush();
-      Utilities.sleep(2000);
-
-      hoja.getRange("L10").setValue(mensaje.length);
-      SpreadsheetApp.flush();
-      Utilities.sleep(2000);
-
-      hoja.getRange("L8").setBackground(null);
-      hoja.getRange("L10").setBackground(null);
-      hoja.getRange("K147").setValue(indiceArrays + 1);
-
-      SpreadsheetApp.flush();
-
-    } else {
-      hoja.getRange("A1").setValue(mensaje);
-      SpreadsheetApp.flush();
-      Utilities.sleep(2000);
-
-      hoja.getRange("K147").setValue(0);
-      hoja.getRange("K148").setValue(indicePrograma + 1);
-
-      SpreadsheetApp.flush();
-    }
-
-    SpreadsheetApp.flush();
-  }
+  
 }
 function detenerSimulador() {
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("i-software");
-  
-  hoja.getRange("K146").setValue("STOP");
-  SpreadsheetApp.flush();
+    
+    hoja.getRange("S47").setBackground("#ffeb3b");
+    hoja.getRange("S47").setValue("TECLA PRESIONADA");
+    SpreadsheetApp.flush();
+    Utilities.sleep(500);
+    
+    hoja.getRange("S43").setValue("25H"); 
+    hoja.getRange("S53").setBackground("red");
+    
+    hoja.getRange("S47").setBackground(null);
 
 }
 function pausarSimulador() {
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("i-software");
-  
-  hoja.getRange("K149").setValue("PAUSE");
-  SpreadsheetApp.flush();
+  if (!hoja) return;
 
-}
-function procesoDetenido(){
-  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("i-software");
-  
+  // Celdas cuyo contenido o fondo cambian durante la simulación
+  const refs = [
+    "U5", "U6", "U16", "U17", "A1",
+    "L8", "L12", "L10",
+    "S43", "S47", "S48", "S49", "S53", "S54",
+    "Z11", "Z12", "Z13", "Z14", "Z15", "Z16",
+    "U30", "U33", "E68"
+  ];
+
+  refs.forEach(ref => {
+    try {
+      hoja.getRange(ref).clearContent();
+      hoja.getRange(ref).setBackground(null);
+    } catch (e) {
+      // ignore if a particular cell/range does not exist
+    }
+  });
+
+  // Estados y contadores
+  try { hoja.getRange("K146").setValue("RUN"); } catch (e) {}
+  try { hoja.getRange("K147").setValue(0); } catch (e) {}
+  try { hoja.getRange("K148").setValue(0); } catch (e) {}
+  try { hoja.getRange("K149").setValue("RUN"); } catch (e) {}
+
+  SpreadsheetApp.flush();
   hoja.getRange("S47").setBackground("red");
+
+function reiniciarSimulador() {
+  limpiarSimulador();
+}
   hoja.getRange("S47").setValue("Tecla 1");
   SpreadsheetApp.flush();
   Utilities.sleep(2000);
@@ -236,19 +187,47 @@ function procesoPausado(){
 function limpiarSimulador() {
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("i-software");
   
-  // Celdas que usaste con setValue
   const celdas = [
-    "U5", "U6", "U16", "U17", // comandos y etiquetas
-              // índices
-    "L8", "L12", "L10",       // memorias y longitud
-    "A1"                      // mensaje final
+    "U5", "U6", "U16", "U17",
+    "L8", "L12", "L10",
+    "A1"
   ];
   
-  // Limpiar todas esas celdas
   celdas.forEach(ref => {
     hoja.getRange(ref).clearContent();
   });
-   hoja.getRange("K147").setValue(0);
+  hoja.getRange("K147").setValue(0);
   hoja.getRange("K148").setValue(0);
+  hoja.getRange("K146").setValue("RUN");
 
+}
+function simularPulsacionTecla1() {
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("i-software");
+    hoja.getRange("S47").setBackground("red");
+    hoja.getRange("S47").setValue("Tecla 1 PRESIONADA");
+    SpreadsheetApp.flush();
+    Utilities.sleep(1000);
+    hoja.getRange("S43").setValue("25H");
+    hoja.getRange("S53").setBackground("red");
+    
+    hoja.getRange("S47").setBackground(null);
+}
+
+function obtenerCodigoIRQ() {
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("i-software");
+    return hoja.getRange("S43").getValue();
+}
+
+function limpiarBanderaInterrupcion() {
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("i-software");
+  hoja.getRange("S43").setValue(null);
+  hoja.getRange("S53").setBackground(null);
+}
+
+function ejecutarISR_INT1() {
+  procesoDetenido();
+}
+
+function ejecutarISR_INT2() {
+  procesoPausado();
 }

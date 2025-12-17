@@ -1,20 +1,18 @@
-/******************************************
- * PIPELINE COMPARADO: Von Neumann vs Harvard
- ******************************************/
 
-function inicializarPipelineComparado() {
+
+function inicializarPipelineComparado_legacy() {
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Pipeline");
 
-  hoja.getRange(2, 1, 20, 12).clearContent().clearFormat();   // Von Neumann
-  hoja.getRange(26, 1, 20, 12).clearContent().clearFormat();  // Harvard
+  hoja.getRange(2, 1, 20, 12).clearContent().clearFormat();
+  hoja.getRange(26, 1, 20, 12).clearContent().clearFormat();
 
-  hoja.getRange("D71").setValue(0);  // VN
-  hoja.getRange("F71").setValue(0);  // Harvard
+  hoja.getRange("D71").setValue(0);
+  hoja.getRange("F71").setValue(0);
 
   SpreadsheetApp.getActiveSpreadsheet().toast("Pipeline inicializado ✅", "Estado");
 }
 
-function avanzarPipelineComparado() {
+function avanzarPipelineComparado_legacy() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojaCodigo = ss.getSheetByName("Pipeline");
   const hojaPipeline = ss.getSheetByName("Pipeline");
@@ -36,14 +34,14 @@ function avanzarPipelineComparado() {
   let cicloVN = parseInt(hojaPipeline.getRange("D71").getValue() || 0, 10) + 1;
   let cicloH  = parseInt(hojaPipeline.getRange("F71").getValue() || 0, 10) + 1;
 
-  hojaPipeline.getRange("D71").setValue(cicloVN);
+    hojaPipeline.getRange("D71").setValue(cicloVN);
   hojaPipeline.getRange("F71").setValue(cicloH);
 
-  avanzarPipeline(hojaPipeline, instrucciones, cicloVN, 2, true);   // Von Neumann
-  avanzarPipeline(hojaPipeline, instrucciones, cicloH, 26, false);  // Harvard
+    avanzarPipeline_legacy(hojaPipeline, instrucciones, cicloVN, 2, true);
+    avanzarPipeline_legacy(hojaPipeline, instrucciones, cicloH, 26, false);
 }
 
-function avanzarPipeline(hoja, instrucciones, ciclo, filaInicio, stalls) {
+  function avanzarPipeline_legacy(hoja, instrucciones, ciclo, filaInicio, stalls) {
   let IF = instrucciones[ciclo - 1] || "";
   let ID = instrucciones[ciclo - 2] || "";
   let EX = instrucciones[ciclo - 3] || "";
@@ -52,26 +50,26 @@ function avanzarPipeline(hoja, instrucciones, ciclo, filaInicio, stalls) {
 
   let comentario = "";
 
-  if (stalls && hayHazard(ID, EX)) {
+  if (stalls && hayHazard_legacy(ID, EX)) {
     ID = "⏸";
     comentario = "Data hazard stall";
   }
 
   const filaDestino = filaInicio + ciclo - 1;
 
-  hoja.getRange(filaDestino, 1).setValue(ciclo); // Ciclo
-  hoja.getRange(filaDestino, 3).setValue(IF);    // IF
-  hoja.getRange(filaDestino, 4).setValue(ID);    // ID
-  hoja.getRange(filaDestino, 5).setValue(EX);    // EX
-  hoja.getRange(filaDestino, 6).setValue(MEM);   // MEM
-  hoja.getRange(filaDestino, 7).setValue(WB);    // WB
-  hoja.getRange(filaDestino, 12).setValue(comentario); // Comentario
+  hoja.getRange(filaDestino, 1).setValue(ciclo);
+  hoja.getRange(filaDestino, 3).setValue(IF);
+  hoja.getRange(filaDestino, 4).setValue(ID);
+  hoja.getRange(filaDestino, 5).setValue(EX);
+  hoja.getRange(filaDestino, 6).setValue(MEM);
+  hoja.getRange(filaDestino, 7).setValue(WB);
+  hoja.getRange(filaDestino, 12).setValue(comentario);
 
-  aplicarFormatoPipeline();
-  marcarPuntoDeQuiebre(hoja);
+  aplicarFormatoPipeline_legacy();
+  marcarPuntoDeQuiebre_legacy(hoja);
 }
 
-function hayHazard(instrActual, instrAnterior) {
+function hayHazard_legacy(instrActual, instrAnterior) {
   if (!instrActual || !instrAnterior) return false;
 
   const destinoAnterior = instrAnterior.split(' ')[1]?.replace(',', '');
@@ -80,7 +78,7 @@ function hayHazard(instrActual, instrAnterior) {
   return operandosActual.includes(destinoAnterior);
 }
 
-function aplicarFormatoPipeline() {
+function aplicarFormatoPipeline_legacy() {
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Pipeline");
   const rangoVN = hoja.getRange("C2:G21");
   const rangoH  = hoja.getRange("C26:G45");
@@ -112,8 +110,8 @@ function aplicarFormatoPipeline() {
     }
   };
 
-  aplicarRojo("D", 2);   // Von Neumann
-  aplicarRojo("D", 26);  // Harvard
+  aplicarRojo("D", 2);
+  aplicarRojo("D", 26);
 
   const aplicarAmarilloComentarios = (filaInicio) => {
     const rangoComentarios = hoja.getRange(filaInicio, 12, 20, 1);
@@ -129,7 +127,7 @@ function aplicarFormatoPipeline() {
   aplicarAmarilloComentarios(26);
 }
 
-function marcarPuntoDeQuiebre(hoja) {
+function marcarPuntoDeQuiebre_legacy(hoja) {
   const rangoVN = hoja.getRange("D2:D21").getValues();
   for (let i = 0; i < rangoVN.length; i++) {
     if (rangoVN[i][0] === "⏸") {
@@ -141,7 +139,7 @@ function marcarPuntoDeQuiebre(hoja) {
   }
 }
 
-function reiniciarPipeline() {
+function reiniciarPipeline_legacy() {
   const hojaPipeline = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Pipeline");
 
   hojaPipeline.getRange(2, 1, 20, 12).clearContent().clearFormat();

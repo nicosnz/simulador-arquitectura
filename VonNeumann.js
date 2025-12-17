@@ -3,19 +3,55 @@ class InterfazHoja {
     this.hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(nombreHoja);
   }
 
+  /**
+   * Ejecuta todos los pasos automáticamente hasta terminar o hasta que se llame a detenerEjecucion().
+   * delayMs: espera entre pasos para que se vean las actualizaciones en la hoja (ms).
+   */
+  ejecutarTodo(delayMs = 300, maxSteps = 10000) {
+    try {
+      this._detener = false;
+      const instrucciones = this.interfazCodigo.leerInstrucciones().filter(inst => inst && !/^int\s+\w+\s*=\s*\d+$/i.test(inst));
+      const total = instrucciones.length;
+      let pasos = 0;
+
+      while (!this._detener) {
+        const pasoActual = this.interfazVonNeumann.leerDeCelda(112,9) || 0;
+        if (pasoActual >= total) break;
+        this.ejecutarPaso();
+        pasos++;
+        if (pasos >= maxSteps) {
+          Logger.log('ejecutarTodo: alcanzado maxSteps, abortando');
+          break;
+        }
+        SpreadsheetApp.flush();
+        Utilities.sleep(delayMs);
+      }
+      return true;
+    } catch (e) {
+      Logger.log('ejecutarTodo error: ' + e.message);
+      return false;
+    }
+  }
+
+  detenerEjecucion() {
+    try {
+      this._detener = true;
+      return true;
+    } catch(e) { Logger.log('detenerEjecucion error: ' + e.message); return false; }
+  }
+
   leerInstrucciones() {
     
     const filaInicio = 11;
-    const columna = 11; // Columna K
+    const columna = 11;
     const totalFilas = this.hoja.getLastRow() - filaInicio + 1;
 
     const rango = this.hoja.getRange(filaInicio, columna, totalFilas, 1);
     const instrucciones = rango.getDisplayValues().flat();
 
-    // Filtrar instrucciones no vacías ni con solo espacios
     return instrucciones
-      .map(inst => inst.trim())           // Elimina espacios alrededor
-      .filter(inst => inst.length > 0);   // Solo conserva las que tienen contenido
+      .map(inst => inst.trim())
+      .filter(inst => inst.length > 0);
 
 
   }
@@ -30,17 +66,28 @@ class InterfazHoja {
 
   limpiarCelda(celdaOFila, columna) {
     if (typeof celdaOFila === "string" && columna === undefined) {
-      // Caso: limpiarCelda("A1")
       this.hoja.getRange(celdaOFila).clearContent();
     } else if (typeof celdaOFila === "number" && typeof columna === "number") {
-      // Caso: limpiarCelda(14, 21)
+      
       this.hoja.getRange(celdaOFila, columna).clearContent();
     
     }
   }
 
-  cambiarColorCelda(celda, color) {
-    this.hoja.getRange(celda).setBackground(color);
+  cambiarColorCelda(celdaOrFila, colorOrColumna, maybeColor) {
+    // Support two call styles:
+    // - cambiarColorCelda('A1', color)
+    // - cambiarColorCelda(fila, columna, color)
+    if (typeof celdaOrFila === 'string' && maybeColor === undefined) {
+      // A1 notation
+      this.hoja.getRange(celdaOrFila).setBackground(colorOrColumna);
+    } else if (typeof celdaOrFila === 'number' && typeof colorOrColumna === 'number') {
+      const color = maybeColor;
+      this.hoja.getRange(celdaOrFila, colorOrColumna).setBackground(color);
+    } else {
+      // Fallback: try to set background using single argument
+      this.hoja.getRange(celdaOrFila).setBackground(colorOrColumna);
+    }
   }
 
   
@@ -49,28 +96,38 @@ class InterfazHoja {
 class CacheLRU {
   constructor(tamano) {
     this.tamano = tamano;
-    this.map = new Map(); // mantiene orden de uso
+    this.map = new Map();
   }
 
   get(direccion) {
     if (this.map.has(direccion)) {
       const valor = this.map.get(direccion);
-      // Reordenar para marcar como "recientemente usado"
       this.map.delete(direccion);
       this.map.set(direccion, valor);
       
       return valor;
     }
-    return null; // Miss
+    return null;
+  }
+
+  has(direccion) {
+    return this.map.has(direccion);
+  }
+
+  clear() {
+    this.map.clear();
   }
 
   set(direccion, valor) {
-    if (this.map.size >= this.tamano) {
-      // Eliminar el menos usado (primer elemento)
-      const primera = this.map.keys().next().value;
-      this.map.delete(primera);
+    let direccionReemplazada = null;
+    if (this.map.has(direccion)) {
+        this.map.delete(direccion); 
+    } else if (this.map.size >= this.tamano) {
+      direccionReemplazada = this.map.keys().next().value;
+        this.map.delete(direccionReemplazada);
     }
     this.map.set(direccion, valor);
+    return direccionReemplazada;
   }
   printMap(){
     for (const [clave, valor] of this.map) {
@@ -87,61 +144,107 @@ class JerarquiaCache {
     this.hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("VON NEUMANN");
   }
 
+  obtenerRangoCache(nivel) {
+    switch (nivel) {
+    case "L1":
+            return { inicioFila: 73, finFila: 95, colDir: 3, colVal: 6, colEst: 7 };
+    case "L2":
+            return { inicioFila: 73, finFila: 95, colDir: 13, colVal: 15, colEst: 16 };
+    case "L3":
+            return { inicioFila: 73, finFila: 95, colDir: 22, colVal: 24, colEst: 25 };
+        default:
+            throw new Error(`Nivel de caché inválido: ${nivel}`);
+    }
+}
+
+actualizarVisualizacionJerarquia(nivel, direccionNueva, valorNuevo, direccionReemplazada) {
+    const rango = this.obtenerRangoCache(nivel);
+
+    if (direccionReemplazada) {
+        for (let fila = rango.inicioFila; fila <= rango.finFila; fila += 2) {
+            const dirEnCelda = this.hoja.getRange(fila, rango.colDir).getValue();
+            
+            if (dirEnCelda === direccionReemplazada) {
+                this.hoja.getRange(fila, rango.colDir, 1, 3).setBackground("#ea9999");
+                this.hoja.getRange(fila, rango.colEst).setValue("REEMPLAZO (LRU)");
+                SpreadsheetApp.flush();
+          Utilities.sleep(500);
+                this.hoja.getRange(fila, rango.colDir, 1, 2).clearContent();
+                  this.hoja.getRange(fila, rango.colDir, 1, 3).setBackground(null);
+                break;
+            }
+        }
+    }
+
+    let encontrado = false;
+    for (let fila = rango.inicioFila; fila <= rango.finFila; fila += 2) {
+        const dirEnCelda = this.hoja.getRange(fila, rango.colDir).getValue();
+        
+        if (!dirEnCelda) {
+            this.hoja.getRange(fila, rango.colDir).setValue(direccionNueva);
+            this.hoja.getRange(fila, rango.colVal).setValue(valorNuevo);
+            this.hoja.getRange(fila, rango.colDir, 1, 3).setBackground("#b6d7a8");
+            this.hoja.getRange(fila, rango.colEst).setValue("NUEVA ENTRADA");
+            encontrado = true;
+            break;
+        }
+    }
+    
+    if (!encontrado && !direccionReemplazada) {
+        
+    }
+}
   leerMemoria(direccion, programa) {
       
-      let valor = this.cacheL1.get(direccion);
-      
-      if (valor) {
-        Logger.log("hit en cache l1")
-        this.hoja.getRange(73, 8).setValue("🟢 CACHE HIT"); // Columna C = 3
-      
-        return valor;
-      }
+    let valor = this.cacheL1.get(direccion);
 
-      valor = this.cacheL2.get(direccion);
-      if (valor) {
-        Logger.log("hit en cacheL2")
-        this.hoja.getRange(73, 17).setValue("🟢 CACHE HIT");
-        this.cacheL1.set(direccion, valor);
-        
-        return valor;
-      }
-
-      valor = this.cacheL3.get(direccion);
-      if (valor) {
-        Logger.log("hit en cache l3")
-        this.hoja.getRange(73, 26).setValue("🟢 CACHE HIT");
-        this.cacheL2.set(direccion, valor);
-        this.cacheL1.set(direccion, valor);
-        
-        return valor;
-      }
-
-    
-    valor = programa.get(direccion);
-    const claves = Array.from(programa.keys());
-    let i = 0
-    
-    for (let fila = 73; fila <= 95; fila += 2) {
-      this.hoja.getRange(fila, 3).setValue(claves[i]); // Columna C = 3
-      this.hoja.getRange(fila, 6).setValue(programa.get(claves[i])); // Columna f = 6
-      this.hoja.getRange(fila, 13).setValue(claves[i]); // Columna C = 3
-      this.hoja.getRange(fila, 15).setValue(programa.get(claves[i])); // Columna f = 6
-      this.hoja.getRange(fila, 22).setValue(claves[i]); // Columna C = 3
-      this.hoja.getRange(fila, 24).setValue(programa.get(claves[i])); // Columna f = 6
-      i++
+    if (valor !== null && valor !== undefined) {
+      Logger.log("hit en cache l1");
+      this.hoja.getRange(73, 8).setValue("🟢 CACHE HIT");
+      return valor;
     }
-    this.hoja.getRange(73, 8).setValue("🔴 CACHE MISS"); // Columna C = 3
-    this.hoja.getRange(73, 17).setValue("🔴 CACHE MISS"); // Columna f = 6
-    this.hoja.getRange(73, 26).setValue("🔴 CACHE MISS"); // Columna C = 3
-    
-    return valor;
+
+    valor = this.cacheL2.get(direccion);
+    if (valor !== null && valor !== undefined) {
+      Logger.log("hit en cacheL2");
+      this.hoja.getRange(73, 17).setValue("🟢 CACHE HIT");
+      this.cacheL1.set(direccion, valor);
+      return valor;
+    }
+
+    valor = this.cacheL3.get(direccion);
+    if (valor !== null && valor !== undefined) {
+      Logger.log("hit en cache l3");
+      this.hoja.getRange(73, 26).setValue("🟢 CACHE HIT");
+      this.cacheL2.set(direccion, valor);
+      this.cacheL1.set(direccion, valor);
+      return valor;
+    }
+
+    this.hoja.getRange(73, 8).setValue("🔴 CACHE MISS");
+    this.hoja.getRange(73, 17).setValue("🔴 CACHE MISS");
+    this.hoja.getRange(73, 26).setValue("🔴 CACHE MISS");
+
+    const valorRam = programa.get(direccion);
+    if (valorRam !== undefined && valorRam !== null) {
+      const reemplazoL3 = this.cacheL3.set(direccion, valorRam);
+      const reemplazoL2 = this.cacheL2.set(direccion, valorRam);
+      const reemplazoL1 = this.cacheL1.set(direccion, valorRam);
+
+      this.actualizarVisualizacionJerarquia("L3", direccion, valorRam, reemplazoL3);
+      this.actualizarVisualizacionJerarquia("L2", direccion, valorRam, reemplazoL2);
+      this.actualizarVisualizacionJerarquia("L1", direccion, valorRam, reemplazoL1);
+
+      return valorRam;
+    }
+
+    return undefined;
   }
 
   rellenarCachesDesdeHoja() {
     for (let fila = 73; fila <= 95; fila += 2) {
-      const direccion = this.hoja.getRange(fila, 3).getValue(); // Columna C = 3
-      const valor = this.hoja.getRange(fila, 6).getValue(); // Columna f = 6
+      const direccion = this.hoja.getRange(fila, 3).getValue();
+      const valor = this.hoja.getRange(fila, 6).getValue();
       if ((direccion !== "" && direccion !== null) &&(valor !== "" && valor !== null) ) {
         this.cacheL1.set(direccion,valor)
         this.cacheL2.set(direccion,valor)
@@ -152,18 +255,15 @@ class JerarquiaCache {
   animarCacheConHit(direccion) {
     
 
-    // Celdas de caché en orden: L1, L2, L3, RAM
     const celdas = ["H38", "J38", "H46", "M17"];
     const coloresHit = ["#b6d7a8", "#f9cb9c", "#cfe2f3", "#f4cccc"];
     const colorTransito = "#d9d2e9";
     const colorMiss = "#f4cccc";
 
-    // 🔄 Limpiar fondos al inicio sin borrar texto
     for (let celdaRef of celdas) {
       this.hoja.getRange(celdaRef).setBackground(null);
     }
 
-    // Verificar en qué caché está la dirección
     const hitL1 = this.cacheL1.get(direccion) !== null;
     const hitL2 = this.cacheL2.get(direccion) !== null;
     const hitL3 = this.cacheL3.get(direccion) !== null;
@@ -185,7 +285,6 @@ class JerarquiaCache {
       SpreadsheetApp.flush();
     }
 
-    // ❌ Miss total: pintar todas las celdas de rojo
     for (let celdaRef of celdas) {
       this.hoja.getRange(celdaRef).setBackground(colorMiss);
     }
@@ -219,6 +318,106 @@ class CPU {
     this.cachesCPU = new JerarquiaCache()
   }
 
+
+  manejarInterrupcion(irq) {
+    const PC_CELL = { fila: 26, columna: 8 };
+      const LOG_CELL = { fila: 56, columna: 8 };
+    const REGISTERS = {
+        eax: { fila: 30, columna: 8 },
+        ebx: { fila: 32, columna: 8 },
+        ecx: { fila: 34, columna: 8 }
+    };
+    
+    const STACK_BASE_ROW = 100; 
+    const RAM_COL = 24; 
+    this.interfaz.escribirEnCelda(LOG_CELL.fila, LOG_CELL.columna, `⚠️ INTERRUPCIÓN ${irq} DETECTADA. Suspensión.`);
+    this.interfaz.cambiarColorCelda(LOG_CELL.fila, LOG_CELL.columna, "#f4cccc");
+    SpreadsheetApp.flush();
+    Utilities.sleep(1500);
+    
+    const savedPC = this.interfaz.leerDeCelda(PC_CELL.fila, PC_CELL.columna);
+    const savedEAX = this.interfaz.leerDeCelda(REGISTERS.eax.fila, REGISTERS.eax.columna);
+    const savedEBX = this.interfaz.leerDeCelda(REGISTERS.ebx.fila, REGISTERS.ebx.columna);
+
+    this.interfaz.escribirEnCelda(LOG_CELL.fila, LOG_CELL.columna, `Guardando PC (${savedPC}) y Registros en Pila (RAM)...`);
+    this.interfaz.cambiarColorCelda(LOG_CELL.fila, LOG_CELL.columna, "#f9cb9c");
+    SpreadsheetApp.flush();
+    Utilities.sleep(1000);
+    this.interfaz.escribirEnCelda(STACK_BASE_ROW, RAM_COL, savedPC);
+    this.interfaz.escribirEnCelda(STACK_BASE_ROW + 2, RAM_COL, savedEAX);
+    this.interfaz.escribirEnCelda(STACK_BASE_ROW + 4, RAM_COL, savedEBX);
+    
+    this.interfaz.cambiarColorCelda(STACK_BASE_ROW, RAM_COL, "#cfe2f3");
+    this.interfaz.cambiarColorCelda(STACK_BASE_ROW + 2, RAM_COL, "#cfe2f3");
+    this.interfaz.cambiarColorCelda(STACK_BASE_ROW + 4, RAM_COL, "#cfe2f3");
+    SpreadsheetApp.flush();
+    Utilities.sleep(1500);
+    
+    let direccionISR = "";
+    let isrFunctionName = "";
+    if (irq === "25H") {
+        direccionISR = "0x3000"; 
+        isrFunctionName = "ejecutarISR_INT1"; 
+    } else if (irq === "26H") {
+        direccionISR = "0x3010"; 
+        isrFunctionName = "ejecutarISR_INT2";
+    }
+
+    this.interfaz.escribirEnCelda(LOG_CELL.fila, LOG_CELL.columna, `Consultando IVT... PC -> ${direccionISR}`);
+    this.interfaz.cambiarColorCelda(LOG_CELL.fila, LOG_CELL.columna, "#b6d7a8");
+    SpreadsheetApp.flush();
+    Utilities.sleep(1000);
+    this.interfaz.escribirEnCelda(PC_CELL.fila, PC_CELL.columna, direccionISR);
+    this.interfaz.cambiarColorCelda(PC_CELL.fila, PC_CELL.columna, "#b6d7a8");
+    SpreadsheetApp.flush();
+    Utilities.sleep(1000);
+    this.interfaz.escribirEnCelda(LOG_CELL.fila, LOG_CELL.columna, `Ejecutando ISR (${isrFunctionName})...`);
+    this.interfaz.cambiarColorCelda(LOG_CELL.fila, LOG_CELL.columna, "#93c47d"); 
+    SpreadsheetApp.flush();
+    Utilities.sleep(500);
+    
+    if (typeof globalThis[isrFunctionName] === 'function') {
+      // Delegate actual ISR execution to the Orquestador for safer integration
+      if (typeof globalThis.orquestadorSimulador === 'object' && typeof globalThis.orquestadorSimulador.executeISR === 'function') {
+        globalThis.orquestadorSimulador.executeISR(isrFunctionName);
+      } else {
+        globalThis[isrFunctionName]();
+      }
+    } else {
+      Logger.log(`ISR no encontrada: ${isrFunctionName}`);
+    }
+    this.interfaz.escribirEnCelda(LOG_CELL.fila, LOG_CELL.columna, "ISR Terminada. Restaurando Contexto...");
+    this.interfaz.cambiarColorCelda(LOG_CELL.fila, LOG_CELL.columna, "#ffeb3b");
+    SpreadsheetApp.flush();
+    Utilities.sleep(1500);
+    this.interfaz.escribirEnCelda(PC_CELL.fila, PC_CELL.columna, savedPC);
+    this.interfaz.escribirEnCelda(REGISTERS.eax.fila, REGISTERS.eax.columna, savedEAX);
+    this.interfaz.escribirEnCelda(REGISTERS.ebx.fila, REGISTERS.ebx.columna, savedEBX);
+    
+    this.interfaz.cambiarColorCelda(STACK_BASE_ROW, RAM_COL, null);
+    this.interfaz.cambiarColorCelda(STACK_BASE_ROW + 2, RAM_COL, null);
+    this.interfaz.cambiarColorCelda(STACK_BASE_ROW + 4, RAM_COL, null);
+    limpiarBanderaInterrupcion(); 
+    this.interfaz.cambiarColorCelda(PC_CELL.fila, PC_CELL.columna, null);
+    this.interfaz.cambiarColorCelda(LOG_CELL.fila, LOG_CELL.columna, null);
+    this.interfaz.escribirEnCelda(LOG_CELL.fila, LOG_CELL.columna, null);
+    this.interfaz.escribirEnCelda(113, 9, 0);
+    SpreadsheetApp.flush();
+}
+
+  // Allow external orchestrator to trigger an immediate IRQ handling
+  checkAndHandleIRQ() {
+    try {
+      const irq = typeof globalThis.obtenerCodigoIRQ === 'function' ? globalThis.obtenerCodigoIRQ() : null;
+      if (irq) {
+        this.cpu.manejarInterrupcion(irq);
+        return true;
+      }
+    } catch (e) {
+      Logger.log('checkAndHandleIRQ error: ' + e.message);
+    }
+    return false;
+  }
   fetch(pasoActual) {
     
 
@@ -228,7 +427,6 @@ class CPU {
     const columna = 8;
     this.interfaz.limpiarCelda("H56");
 
-    // Obtener todas las instrucciones
     const instrucciones = this.interfazCodigo.leerInstrucciones();
 
     const direccionesInstrucciones = [];
@@ -245,7 +443,6 @@ class CPU {
 
     
 
-    // Mostrar la dirección correspondiente al paso actual
     if (pasoActual < direccionesInstrucciones.length) {
       const direccion = direccionesInstrucciones[pasoActual];
       this.interfaz.escribirEnCelda(fila, columna, direccion);
@@ -263,19 +460,16 @@ class CPU {
     const instrucciones = this.interfazCodigo.leerInstrucciones();
     const fila = 28;
     const columna = 8;
-    this.interfaz.cambiarColorCelda("O27",null)
-    this.interfaz.cambiarColorCelda("U18","ffeb3b3")
-    this.interfaz.cambiarColorCelda("U20","ffeb3b3")
-    this.interfaz.cambiarColorCelda("U22","ffeb3b3")
+    this.interfaz.cambiarColorCelda("O27", null);
+    this.interfaz.cambiarColorCelda("U18", "#ffeb3b");
+    this.interfaz.cambiarColorCelda("U20", "#ffeb3b");
+    this.interfaz.cambiarColorCelda("U22", "#ffeb3b");
     this.cachesCPU.rellenarCachesDesdeHoja();
 
-    // Construir el programa completo: variables + instrucciones
     for (let i = 0; i < instrucciones.length; i++) {
       const inst = instrucciones[i].trim();
       programa.set(this.memorias[i], inst);
     }
-
-    // Filtrar solo las direcciones que contienen instrucciones válidas
     const claves = [];
     for (let i = 0; i < instrucciones.length; i++) {
       const inst = instrucciones[i].trim();
@@ -310,9 +504,30 @@ class CPU {
 
     if (pasoActual < claves.length) {
       const direccion = claves[pasoActual];
-      const instruccion = this.cachesCPU.leerMemoria(direccion, programa); // usa el mapa completo
+      const instruccion = this.cachesCPU.leerMemoria(direccion, programa);
       this.cachesCPU.animarCacheConHit(direccion);
       this.interfaz.escribirEnCelda(fila, columna, instruccion);
+
+      // Mostrar símbolo de operación en E58 cuando corresponda
+      try {
+        const operacion = (instruccion || '').split(/[\s,]+/)[0]?.toLowerCase();
+        let simbolo = '';
+        if (operacion === 'add') simbolo = '+';
+        else if (operacion === 'sub') simbolo = '-';
+        else if (operacion === 'mul') simbolo = '×';
+        else if (operacion === 'mov' || operacion === 'movl') simbolo = 'mov';
+        this.interfaz.escribirEnCelda(58, 5, simbolo);
+        // Sincronizar el símbolo con i-software!L28 para visibilidad de I/O
+        try {
+          const ss = SpreadsheetApp.getActiveSpreadsheet();
+          const i = ss.getSheetByName('i-software');
+          if (i) i.getRange('L28').setValue(simbolo);
+        } catch (err) {
+          Logger.log('No se pudo sincronizar E58->i-software L28: ' + err.message);
+        }
+      } catch (e) {
+        Logger.log('No se pudo escribir símbolo en E58: ' + e.message);
+      }
     }
 
     if (pasoActual + 1 < claves.length) {
@@ -326,13 +541,10 @@ class CPU {
     const programa = new Map();
     const instrucciones = this.interfazCodigo.leerInstrucciones();
 
-    // Construir programa completo
     for (let i = 0; i < instrucciones.length; i++) {
       const inst = instrucciones[i].trim();
       programa.set(this.memorias[i], inst);
     }
-
-    // Filtrar solo direcciones con instrucciones válidas
     const claves = [];
     for (let i = 0; i < instrucciones.length; i++) {
       const inst = instrucciones[i].trim();
@@ -355,7 +567,6 @@ class CPU {
 
       let destino, fuente;
 
-      // Detectar si los operandos están invertidos
       if (registros[op1]) {
         destino = op1;
         fuente = op2;
@@ -366,15 +577,12 @@ class CPU {
         destino = op1;
         fuente = op2;
       }
-
-      // Obtener valor fuente desde registro, número o variable en memoria
       let valor;
       if (registros[fuente]) {
         valor = parseInt(this.interfaz.leerDeCelda(registros[fuente].fila, registros[fuente].columna)) || 0;
       } else if (/^\d+$/.test(fuente)) {
         valor = parseInt(fuente);
       } else {
-        // Buscar en memoria si fuente es una variable como "a"
         const direccionFuente = Array.from(programa.entries()).find(([_, val]) =>
           new RegExp(`int\\s+${fuente}\\s*=\\s*\\d+`, "i").test(val)
         )?.[0];
@@ -387,20 +595,51 @@ class CPU {
         }
       }
 
+      // Determinar valor actual del destino (operand1) y del operando fuente (operand2)
+      let valorDestinoActual = null;
+      try {
+        if (registros[destino]) {
+          valorDestinoActual = parseInt(this.interfaz.leerDeCelda(registros[destino].fila, registros[destino].columna)) || 0;
+        } else {
+          const direccionDestino = Array.from(programa.entries()).find(([_, val]) =>
+            new RegExp(`int\\s+${destino}\\s*=`, "i").test(val)
+          )?.[0];
+          if (direccionDestino) {
+            const index = this.memorias.indexOf(direccionDestino);
+            const filaDestino = 14 + index * 2;
+            const columnaDestino = 24;
+            const memVal = this.interfaz.leerDeCelda(filaDestino, columnaDestino);
+            valorDestinoActual = parseInt(memVal) || 0;
+          }
+        }
+      } catch (e) {
+        Logger.log('No se pudo determinar valor destino actual: ' + e.message);
+      }
+
+      // Mostrar operandos listos en H53 (operand1) y J53 (operand2)
+      try {
+        this.interfaz.escribirEnCelda(53, 8, valorDestinoActual !== null ? valorDestinoActual : '');
+        this.interfaz.escribirEnCelda(53, 10, valor !== undefined && valor !== null ? valor : '');
+      } catch (e) { Logger.log('No se pudo mostrar operandos en H53/J53: ' + e.message); }
+
+      // Mostrar el operando que será leído por la ALU en E68 (columna E = 5)
+      try {
+        this.interfaz.escribirEnCelda(68, 5, valor);
+      } catch (e) {
+        Logger.log('No se pudo mostrar el operando en E68: ' + e.message);
+      }
+
       if (operacion === "mov" || operacion === "movl") {
         if (registros[destino]) {
-          // Escribir en registro
           this.interfaz.escribirEnCelda(registros[destino].fila, registros[destino].columna, valor);
         } 
         else {
-          // Buscar dirección de variable destino
           const direccionDestino = Array.from(programa.entries()).find(([_, val]) =>
             new RegExp(`int\\s+${destino}\\s*=`, "i").test(val)
           )?.[0];
           Logger.log(direccionDestino)
 
           if (direccionDestino) {
-            // Calcular fila destino en hoja RAM
             const index = this.memorias.indexOf(direccionDestino);
             const filaDestino = 14 + index * 2;
             const columnaDestino = 24;
@@ -410,6 +649,16 @@ class CPU {
             throw new Error(`Destino inválido o no encontrado: ${destino}`);
           }
         }
+
+        // Limpiar visual del operando una vez aplicada la operación
+        try { this.interfaz.limpiarCelda('E68'); this.interfaz.cambiarColorCelda('E68', null); } catch (e) {}
+
+        // Limpiar casillas de operandos H53/J53
+        try { this.interfaz.limpiarCelda(53, 8); this.interfaz.limpiarCelda(53, 10); } catch(e) {}
+
+        // Limpiar símbolo de operación en E58 y sincronizar limpieza con i-software!L28
+        try { this.interfaz.limpiarCelda('E58'); } catch (e) {}
+        try { const ss = SpreadsheetApp.getActiveSpreadsheet(); const i = ss.getSheetByName('i-software'); if (i) i.getRange('L28').setValue(''); } catch(e) {}
 
       } else if (["add", "sub", "mul"].includes(operacion)) {
         const valorActual = parseInt(this.interfaz.leerDeCelda(registros[destino].fila, registros[destino].columna)) || 0;
@@ -434,6 +683,12 @@ class CPU {
         this.interfaz.escribirEnCelda(56, 8, `${valorActual} ${simbolo} ${valor} = ${resultado}`);
         this.interfaz.escribirEnCelda(registros[destino].fila, registros[destino].columna, resultado);
 
+        // Limpiar visual del operando una vez aplicada la operación
+        try { this.interfaz.limpiarCelda('E68'); this.interfaz.cambiarColorCelda('E68', null); } catch (e) {}
+
+        // Limpiar casillas de operandos H53/J53
+        try { this.interfaz.limpiarCelda(53, 8); this.interfaz.limpiarCelda(53, 10); } catch(e) {}
+
       } else {
         throw new Error(`Operación no soportada: ${operacion}`);
       }
@@ -447,6 +702,8 @@ class SimuladorVonNeumann {
     this.interfazVonNeumann = new InterfazHoja("VON NEUMANN");
     this.interfazCodigo = new InterfazHoja("Código");
     this.cpu = new CPU("VON NEUMANN");
+    // Flag para controlar la ejecución continua (detener desde UI)
+    this._detener = false;
     
   }
 
@@ -462,7 +719,6 @@ class SimuladorVonNeumann {
       const filaDestino = filaInicio + j * 2;
       const instruccion = instrucciones[j].trim();
 
-      // Detectar declaración de variable tipo: int a = 10
       const esDeclaracion = /^int\s+\w+\s*=\s*\d+$/i.test(instruccion);
 
       if (esDeclaracion) {
@@ -479,12 +735,16 @@ class SimuladorVonNeumann {
   ejecutarPaso() {
     const pasoActual = this.interfazVonNeumann.leerDeCelda(112, 9) || 0;
     const subpaso = this.interfazVonNeumann.leerDeCelda(113, 9) || 0;
-
-    // fase del ciclo
+    const irq = obtenerCodigoIRQ();
+    
+    if (irq) {
+      this.cpu.manejarInterrupcion(irq); 
+      return;
+    }
 
     if (subpaso === 0) {
       this.cpu.fetch(pasoActual);
-      this.interfazVonNeumann.escribirEnCelda(113,9,1) // avanzar a decode
+      this.interfazVonNeumann.escribirEnCelda(113,9,1)
     } 
     else if (subpaso === 1) {
       this.cpu.decode(pasoActual);
@@ -497,6 +757,7 @@ class SimuladorVonNeumann {
       
     }
   }
+  
   
 
   reiniciar() {
@@ -519,17 +780,163 @@ class SimuladorVonNeumann {
     this.interfazVonNeumann.limpiarCelda(73,17)
     this.interfazVonNeumann.limpiarCelda(73,26)
     this.interfazVonNeumann.limpiarCelda("H56")
+    // Limpiar casillas de operandos preparadas
+    try { this.interfazVonNeumann.limpiarCelda(53,8); this.interfazVonNeumann.limpiarCelda(53,10); } catch(e) {}
     this.interfazVonNeumann.cambiarColorCelda("H38",null)
     this.interfazVonNeumann.cambiarColorCelda("J38",null)
     this.interfazVonNeumann.cambiarColorCelda("H46",null)
     this.interfazVonNeumann.cambiarColorCelda("M17",null)
+    // Limpiar E58 (símbolo de operación) y sincronizar con i-software!L28
+    try { this.interfazVonNeumann.limpiarCelda('E58'); } catch (e) {}
+    try { const ss = SpreadsheetApp.getActiveSpreadsheet(); const i = ss.getSheetByName('i-software'); if (i) i.getRange('L28').setValue(''); } catch(e) {}
+    // Reiniciar bandera de detener ejecución
+    try { this._detener = false; } catch(e) {}
+    // Limpiar tabla de Memoria Virtual (AE73..AH136) y contadores
+    try {
+      const hoja = this.interfazVonNeumann.hoja;
+      for (let row = 73; row <= 136; row++) {
+        hoja.getRange(row, 31).clearContent(); // AE: direccion/página
+        hoja.getRange(row, 33).clearContent(); // AG: valor
+        hoja.getRange(row, 34).clearContent(); // AH: estado
+      }
+      hoja.getRange(70, 31).clearContent(); // AE70 label
+      hoja.getRange(70, 33).clearContent(); // AG70 value (page faults)
+      hoja.getRange(71, 31).clearContent(); // AE71 label
+      hoja.getRange(71, 33).clearContent(); // AG71 value (swaps)
+    } catch(e) {}
          
+
+  // VM methods implemented as prototypes below to ensure compatibility with the runtime
       
 
   }
 }
 
 let simulador = null;
+
+// Implement VM methods on the prototype for wider compatibility
+SimuladorVonNeumann.prototype.inicializarMemoriaVirtual = function(entries, startRow, startCol) {
+  if (typeof entries === 'undefined' || entries === null) entries = 64;
+  if (typeof startRow === 'undefined' || startRow === null) startRow = 73;
+  if (typeof startCol === 'undefined' || startCol === null) startCol = 31; // AE
+  try {
+    var hoja = this.interfazVonNeumann.hoja;
+    this.vm = {
+      entries: entries,
+      pageSize: 1,
+      frameCapacity: 16,
+      startRow: startRow,
+      startCol: startCol,
+      colAddress: startCol,
+      colValue: startCol + 2,
+      colState: startCol + 3,
+      swapBaseRow: startRow + entries,
+      pageTable: new Array(entries).fill(null).map(function(){ return { state: 'SWAP', frame: null }; }),
+      frameToPage: new Array(16).fill(null),
+      nextVictim: 0,
+      pageFaults: 0,
+      swaps: 0
+    };
+
+    hoja.getRange(startRow - 1, this.vm.colAddress).setValue('VM Page');
+    hoja.getRange(startRow - 1, this.vm.colValue).setValue('Value');
+    hoja.getRange(startRow - 1, this.vm.colState).setValue('State');
+
+    for (var i = 0; i < entries; i++) {
+      var row = startRow + i;
+      hoja.getRange(row, this.vm.colAddress).setValue(i);
+      hoja.getRange(row, this.vm.colValue).setValue('');
+      hoja.getRange(row, this.vm.colState).setValue('SWAP');
+    }
+
+    hoja.getRange(startRow - 3, this.vm.colAddress).setValue('Page Faults');
+    hoja.getRange(startRow - 3, this.vm.colValue).setValue(0);
+    hoja.getRange(startRow - 2, this.vm.colAddress).setValue('Swaps');
+    hoja.getRange(startRow - 2, this.vm.colValue).setValue(0);
+
+    SpreadsheetApp.flush();
+    return true;
+  } catch (e) {
+    Logger.log('inicializarMemoriaVirtual error: ' + e.message);
+    return false;
+  }
+};
+
+SimuladorVonNeumann.prototype.accederMemoriaVirtual = function(pageIndex) {
+  try {
+    if (!this.vm || pageIndex < 0 || pageIndex >= this.vm.entries) throw new Error('Página inválida');
+    var hoja = this.interfazVonNeumann.hoja;
+    var entry = this.vm.pageTable[pageIndex];
+
+    if (entry && entry.state && entry.state.indexOf('RAM') === 0) {
+      var frame = entry.frame;
+      var filaRam = this.getRamRowForFrame(frame);
+      var valor = hoja.getRange(filaRam, 24).getValue();
+      hoja.getRange(73, 8).setValue('🟢 VM HIT');
+      SpreadsheetApp.flush();
+      return { hit: true, page: pageIndex, frame: frame, value: valor };
+    }
+
+    // Page fault
+    this.vm.pageFaults++;
+    hoja.getRange(this.vm.startRow - 3, this.vm.colValue).setValue(this.vm.pageFaults);
+    hoja.getRange(73, 8).setValue('🔴 VM PAGE FAULT');
+
+    var frame = this.vm.frameToPage.indexOf(null);
+    var swappedOut = false;
+    if (frame === -1) {
+      frame = this.vm.nextVictim;
+      var victimPage = this.vm.frameToPage[frame];
+      if (victimPage !== null && typeof victimPage !== 'undefined') {
+        var filaVictimRam = this.getRamRowForFrame(frame);
+        var valorVictim = hoja.getRange(filaVictimRam, 24).getValue();
+        var filaSwap = this.vm.swapBaseRow + victimPage;
+        hoja.getRange(filaSwap, this.vm.colAddress).setValue(victimPage);
+        hoja.getRange(filaSwap, this.vm.colValue).setValue(valorVictim);
+        hoja.getRange(filaSwap, this.vm.colState).setValue('SWAPPED_OUT');
+        this.vm.pageTable[victimPage].state = 'SWAP';
+        this.vm.pageTable[victimPage].frame = null;
+        this.vm.swaps++;
+        hoja.getRange(this.vm.startRow - 2, this.vm.colValue).setValue(this.vm.swaps);
+        swappedOut = true;
+      }
+      this.vm.nextVictim = (this.vm.nextVictim + 1) % this.vm.frameCapacity;
+    }
+
+    this.vm.frameToPage[frame] = pageIndex;
+    var filaSwapSrc = this.vm.swapBaseRow + pageIndex;
+    var valorPagina = hoja.getRange(filaSwapSrc, this.vm.colValue).getValue();
+    if (valorPagina === '' || valorPagina === null) valorPagina = 0;
+
+    var filaRamDestino = this.getRamRowForFrame(frame);
+    hoja.getRange(filaRamDestino, 24).setValue(valorPagina);
+
+    this.vm.pageTable[pageIndex].state = 'RAM f=' + frame;
+    this.vm.pageTable[pageIndex].frame = frame;
+    var rowVm = this.vm.startRow + pageIndex;
+    hoja.getRange(rowVm, this.vm.colValue).setValue(valorPagina);
+    hoja.getRange(rowVm, this.vm.colState).setValue('RAM f=' + frame);
+
+    SpreadsheetApp.flush();
+    return { hit: false, page: pageIndex, frame: frame, swappedOut: swappedOut, value: valorPagina };
+  } catch (e) {
+    Logger.log('accederMemoriaVirtual error: ' + e.message);
+    return null;
+  }
+};
+
+SimuladorVonNeumann.prototype.mostrarEstadoVM = function() {
+  try {
+    if (!this.vm) return null;
+    return {
+      entries: this.vm.entries,
+      pageFaults: this.vm.pageFaults,
+      swaps: this.vm.swaps,
+      frames: this.vm.frameToPage.slice(),
+      pageTable: this.vm.pageTable.map(function(p, i) { return { page: i, state: p.state, frame: p.frame }; })
+    };
+  } catch (e) { Logger.log('mostrarEstadoVM error: ' + e.message); return null; }
+};
 
 function getSimulador() {
   if (!simulador) {
@@ -546,8 +953,41 @@ function ejecutarPasos() {
   getSimulador().ejecutarPaso();
 }
 
+// Ejecuta todo el programa hasta el final (o hasta que se llame a detenerEjecucion)
+function ejecutarTodo() {
+  const res = getSimulador().ejecutarTodo();
+  Logger.log('ejecutarTodo: ' + res);
+  return res;
+}
+
+// Detiene una ejecución en curso iniciada por ejecutarTodo()
+function detenerEjecucion() {
+  const res = getSimulador().detenerEjecucion();
+  Logger.log('detenerEjecucion: ' + res);
+  return res;
+}
+
 function reiniciar() {
   getSimulador().reiniciar();
+}
+
+// Wrappers para probar Memoria Virtual desde el editor
+function ejecutarInicializarVM() {
+  const res = getSimulador().inicializarMemoriaVirtual(64);
+  Logger.log('inicializarMemoriaVirtual: ' + res);
+  return res;
+}
+
+function ejecutarAccesoVM(pageIndex) {
+  const res = getSimulador().accederMemoriaVirtual(pageIndex);
+  Logger.log('accederMemoriaVirtual: ' + JSON.stringify(res));
+  return res;
+}
+
+function ejecutarMostrarVM() {
+  const res = getSimulador().mostrarEstadoVM();
+  Logger.log(JSON.stringify(res, null, 2));
+  return res;
 }
 
 
@@ -568,16 +1008,15 @@ function onEdit(e) {
   const hoja = e.source.getSheetByName("Código");
   const rango = e.range;
 
-  // Verifica que estés editando la columna K (columna 11) desde la fila 11 en adelante
   if (hoja.getName() === "Código" && rango.getColumn() === 11 && rango.getRow() >= 11) {
     const fila = rango.getRow();
     const valor = rango.getValue();
 
-    // Si hay contenido en la celda editada, asigna número de línea en la columna J
+    
     if (valor && valor.toString().trim() !== "") {
-      hoja.getRange(fila, 10).setValue(fila - 10); // Línea 1 empieza en fila 11
+      hoja.getRange(fila, 10).setValue(fila - 10);
     } else {
-      hoja.getRange(fila, 10).clearContent(); // Si borras la instrucción, borra el número
+      hoja.getRange(fila, 10).clearContent();
     }
   }
 }

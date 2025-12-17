@@ -3,43 +3,6 @@ class InterfazHoja {
     this.hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(nombreHoja);
   }
 
-  /**
-   * Ejecuta todos los pasos automáticamente hasta terminar o hasta que se llame a detenerEjecucion().
-   * delayMs: espera entre pasos para que se vean las actualizaciones en la hoja (ms).
-   */
-  ejecutarTodo(delayMs = 300, maxSteps = 10000) {
-    try {
-      this._detener = false;
-      const instrucciones = this.interfazCodigo.leerInstrucciones().filter(inst => inst && !/^int\s+\w+\s*=\s*\d+$/i.test(inst));
-      const total = instrucciones.length;
-      let pasos = 0;
-
-      while (!this._detener) {
-        const pasoActual = this.interfazVonNeumann.leerDeCelda(112,9) || 0;
-        if (pasoActual >= total) break;
-        this.ejecutarPaso();
-        pasos++;
-        if (pasos >= maxSteps) {
-          Logger.log('ejecutarTodo: alcanzado maxSteps, abortando');
-          break;
-        }
-        SpreadsheetApp.flush();
-        Utilities.sleep(delayMs);
-      }
-      return true;
-    } catch (e) {
-      Logger.log('ejecutarTodo error: ' + e.message);
-      return false;
-    }
-  }
-
-  detenerEjecucion() {
-    try {
-      this._detener = true;
-      return true;
-    } catch(e) { Logger.log('detenerEjecucion error: ' + e.message); return false; }
-  }
-
   leerInstrucciones() {
     
     const filaInicio = 11;
@@ -334,6 +297,7 @@ class CPU {
     this.interfaz.cambiarColorCelda(LOG_CELL.fila, LOG_CELL.columna, "#f4cccc");
     SpreadsheetApp.flush();
     Utilities.sleep(1500);
+    try { escribirEnISoftwareA1('Interrupción: ' + irq + ' detectada. Ejecutando ISR...'); } catch(e){}
     
     const savedPC = this.interfaz.leerDeCelda(PC_CELL.fila, PC_CELL.columna);
     const savedEAX = this.interfaz.leerDeCelda(REGISTERS.eax.fila, REGISTERS.eax.columna);
@@ -403,6 +367,7 @@ class CPU {
     this.interfaz.escribirEnCelda(LOG_CELL.fila, LOG_CELL.columna, null);
     this.interfaz.escribirEnCelda(113, 9, 0);
     SpreadsheetApp.flush();
+    try { escribirEnISoftwareA1('ISR ' + irq + ' finalizada. Resumen en LOG.'); } catch(e){}
 }
 
   // Allow external orchestrator to trigger an immediate IRQ handling
@@ -738,23 +703,28 @@ class SimuladorVonNeumann {
     const irq = obtenerCodigoIRQ();
     
     if (irq) {
+      try { escribirEnISoftwareA1('Interrupción detectada: ' + irq); } catch(e){}
       this.cpu.manejarInterrupcion(irq); 
+      try { escribirEnISoftwareA1('Interrupción procesada: ' + irq); } catch(e){}
       return;
     }
 
     if (subpaso === 0) {
+      try { escribirEnISoftwareA1('Ejecución: FETCH paso ' + pasoActual); } catch(e){}
       this.cpu.fetch(pasoActual);
       this.interfazVonNeumann.escribirEnCelda(113,9,1)
     } 
     else if (subpaso === 1) {
+      try { escribirEnISoftwareA1('Ejecución: DECODE paso ' + pasoActual); } catch(e){}
       this.cpu.decode(pasoActual);
       this.interfazVonNeumann.escribirEnCelda(113,9,2)
     } 
     else if (subpaso === 2) {
+      try { escribirEnISoftwareA1('Ejecución: EXECUTE paso ' + pasoActual); } catch(e){}
       this.cpu.execute(pasoActual);
       this.interfazVonNeumann.escribirEnCelda(113,9,0)
       this.interfazVonNeumann.escribirEnCelda(112,9,pasoActual + 1)
-      
+      try { escribirEnISoftwareA1('Ejecución: paso ' + pasoActual + ' completado'); } catch(e){}
     }
   }
   
@@ -938,6 +908,45 @@ SimuladorVonNeumann.prototype.mostrarEstadoVM = function() {
   } catch (e) { Logger.log('mostrarEstadoVM error: ' + e.message); return null; }
 };
 
+// Ejecuta todos los pasos automáticamente hasta terminar o hasta que se llame a detenerEjecucion().
+SimuladorVonNeumann.prototype.ejecutarTodo = function(delayMs, maxSteps) {
+  if (typeof delayMs === 'undefined') delayMs = 300;
+  if (typeof maxSteps === 'undefined') maxSteps = 10000;
+  try {
+    this._detener = false;
+    var instrucciones = this.interfazCodigo.leerInstrucciones().filter(function(inst) { return inst && !/^int\s+\w+\s*=\s*\d+$/i.test(inst); });
+    var total = instrucciones.length;
+    var pasos = 0;
+    try { escribirEnISoftwareA1('Ejecución continua iniciada'); } catch(e){}
+    while (!this._detener) {
+      var pasoActual = this.interfazVonNeumann.leerDeCelda(112,9) || 0;
+      if (pasoActual >= total) break;
+      this.ejecutarPaso();
+      pasos++;
+      if (pasos >= maxSteps) {
+        Logger.log('ejecutarTodo: alcanzado maxSteps, abortando');
+        break;
+      }
+      SpreadsheetApp.flush();
+      Utilities.sleep(delayMs);
+    }
+    try { escribirEnISoftwareA1('Ejecución continua finalizada'); } catch(e){}
+    return true;
+  } catch (e) {
+    Logger.log('ejecutarTodo error: ' + e.message);
+    try { escribirEnISoftwareA1('Ejecución continua abortada: ' + e.message); } catch(e){}
+    return false;
+  }
+};
+
+SimuladorVonNeumann.prototype.detenerEjecucion = function() {
+  try {
+    this._detener = true;
+    try { escribirEnISoftwareA1('Ejecución detenida por usuario'); } catch(e){}
+    return true;
+  } catch(e) { Logger.log('detenerEjecucion error: ' + e.message); try { escribirEnISoftwareA1('Error al detener ejecución: ' + e.message); } catch(e){}; return false; }
+};
+
 function getSimulador() {
   if (!simulador) {
     simulador = new SimuladorVonNeumann();
@@ -988,6 +997,19 @@ function ejecutarMostrarVM() {
   const res = getSimulador().mostrarEstadoVM();
   Logger.log(JSON.stringify(res, null, 2));
   return res;
+}
+
+/**
+ * Escribe un mensaje visible en la celda A1 de la hoja `i-software`.
+ */
+function escribirEnISoftwareA1(msg) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const hoja = ss.getSheetByName('i-software');
+    if (hoja) hoja.getRange('A1').setValue(msg);
+  } catch (e) {
+    Logger.log('escribirEnISoftwareA1 error: ' + e.message);
+  }
 }
 
 
